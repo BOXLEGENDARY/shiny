@@ -1,7 +1,5 @@
 name: Build and Release
-
-on:
-  workflow_dispatch:
+on: workflow_dispatch
 
 jobs:
   get-data:
@@ -12,14 +10,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@master
-
       - name: Read Cargo TOML
         uses: SebRollen/toml-action@v1.0.2
         id: read_toml
         with:
           file: "./medal/Cargo.toml"
           field: "package.version"
-
     outputs:
       version: ${{ steps.read_toml.outputs.value }}
 
@@ -36,7 +32,6 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           custom_tag: ${{ needs.get-data.outputs.version }}
-
       - name: Create Release
         uses: ncipollo/release-action@v1.14.0
         with:
@@ -45,7 +40,7 @@ jobs:
           name: Release ${{ steps.tag_version.outputs.new_tag }}
     outputs:
       tag: ${{ steps.tag_version.outputs.new_tag }}
-  
+
   build:
     name: Build on ${{ matrix.os }} for ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
@@ -56,28 +51,28 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Windows
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             artifact_name: medal-x86_64.exe
-
-          # Linux
           - os: ubuntu-latest
             target: x86_64-unknown-linux-musl
             artifact_name: medal-x86_64-linux-musl
-
-          # macOS
           - os: macos-latest
             target: x86_64-apple-darwin
             artifact_name: medal-x86_64-macos
           - os: macos-latest
             target: aarch64-apple-darwin
             artifact_name: medal-aarch64-macos
-
+          - os: ubuntu-latest
+            target: aarch64-linux-android
+            artifact_name: medal-aarch64-android
+          - os: ubuntu-latest
+            target: armv7-linux-androideabi
+            artifact_name: medal-armv7-android
     steps:
       - name: Checkout
         uses: actions/checkout@master
-
+        
       - name: Install Rust
         uses: actions-rs/toolchain@v1
         with:
@@ -85,12 +80,13 @@ jobs:
           profile: minimal
           toolchain: nightly
           override: true
-
+          
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: "./medal -> target"
-        
-      - name: Build binary
+          
+      - name: Build binary (Non-Android)
+        if: ${{ !contains(matrix.target, 'android') }}
         uses: houseabsolute/actions-rust-cross@v0
         with:
           command: "build"
@@ -98,6 +94,16 @@ jobs:
           args: "-p medal --release"
           toolchain: "nightly"
           strip: true
+
+      - name: Install cargo-ndk (Android)
+        if: ${{ contains(matrix.target, 'android') }}
+        run: cargo install cargo-ndk
+
+      - name: Build binary (Android)
+        if: ${{ contains(matrix.target, 'android') }}
+        run: |
+          cargo ndk -t ${{ matrix.target }} build --release -p medal
+          $ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip target/${{ matrix.target }}/release/medal
 
       - name: Rename artifact
         shell: bash
@@ -108,7 +114,7 @@ jobs:
           else
             mv "${ARTIFACT_DIR}/medal" "${ARTIFACT_DIR}/${{ matrix.artifact_name }}"
           fi
-
+          
       - name: Upload release asset
         uses: svenstaro/upload-release-action@v2
         with:
